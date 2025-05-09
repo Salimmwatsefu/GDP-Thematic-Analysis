@@ -44,7 +44,6 @@ def forecast_sector(df, sector, model_type, forecast_periods=4):
         future_dates = pd.date_range(start=last_date + pd.offsets.QuarterBegin(1), periods=forecast_periods, freq='QS')
         
         if model_type == "SARIMA":
-            # Seasonal ARIMA
             model = SARIMAX(ts_data, order=(1, 1, 1), seasonal_order=(1, 1, 1, 4))
             fit_model = model.fit(disp=False)
             forecast = fit_model.forecast(steps=forecast_periods)
@@ -52,7 +51,6 @@ def forecast_sector(df, sector, model_type, forecast_periods=4):
             return ts_data, forecast, None
 
         elif model_type == "Exponential Smoothing":
-            # Simple Exponential Smoothing
             model = ExponentialSmoothing(ts_data, trend='add', seasonal=None)
             fit_model = model.fit()
             forecast = fit_model.forecast(steps=forecast_periods)
@@ -60,7 +58,6 @@ def forecast_sector(df, sector, model_type, forecast_periods=4):
             return ts_data, forecast, None
 
         elif model_type == "Holt-Winters":
-            # Holt-Winters Exponential Smoothing
             model = ExponentialSmoothing(ts_data, trend='add', seasonal='add', seasonal_periods=4)
             fit_model = model.fit()
             forecast = fit_model.forecast(steps=forecast_periods)
@@ -68,8 +65,6 @@ def forecast_sector(df, sector, model_type, forecast_periods=4):
             return ts_data, forecast, None
 
         elif model_type == "VAR":
-            # Vector Auto Regression
-            # Use related sectors as additional variables
             related_sectors = ['Gdp At Market Prices', sector]
             var_data = df[['Date'] + related_sectors].set_index('Date').dropna()
             if len(var_data) < 8:
@@ -81,21 +76,18 @@ def forecast_sector(df, sector, model_type, forecast_periods=4):
             return ts_data, forecast_df[sector], None
 
         elif model_type == "SARIMAX":
-            # SARIMAX with exogenous variable (e.g., Manufacturing for Electricity)
             exog = prepare_ts_data(df, 'Manufacturing')
             ts_data, exog = ts_data.align(exog, join='inner')
             if len(ts_data) < 8:
                 return None, None, f"Not enough aligned data for SARIMAX on {sector}."
             model = SARIMAX(ts_data, exog=exog, order=(1, 1, 1), seasonal_order=(1, 1, 1, 4))
             fit_model = model.fit(disp=False)
-            # Forecast with future exogenous (assume last known value)
             exog_future = pd.Series([exog[-1]] * forecast_periods, index=future_dates)
             forecast = fit_model.forecast(steps=forecast_periods, exog=exog_future)
             forecast.index = future_dates
             return ts_data, forecast, None
 
         elif model_type == "Prophet":
-            # Facebook Prophet
             prophet_df = pd.DataFrame({'ds': ts_data.index, 'y': ts_data.values})
             model = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
             model.add_seasonality(name='quarterly', period=91.25, fourier_order=8)
@@ -106,21 +98,18 @@ def forecast_sector(df, sector, model_type, forecast_periods=4):
             return ts_data, forecast_series, None
 
         elif model_type == "ARIMA-Exog":
-            # ARIMA with exogenous variable (e.g., GDP for Financial & Insurance)
             exog = prepare_ts_data(df, 'Gdp At Market Prices')
             ts_data, exog = ts_data.align(exog, join='inner')
             if len(ts_data) < 8:
                 return None, None, f"Not enough aligned data for ARIMA-Exog on {sector}."
             model = ARIMA(ts_data, exog=exog, order=(1, 1, 1))
             fit_model = model.fit()
-            # Forecast with future exogenous (assume last known value)
             exog_future = pd.Series([exog[-1]] * forecast_periods, index=future_dates)
             forecast = fit_model.forecast(steps=forecast_periods, exog=exog_future)
             forecast.index = future_dates
             return ts_data, forecast, None
 
         elif model_type == "ARIMA":
-            # Simple ARIMA
             model = ARIMA(ts_data, order=(1, 1, 1))
             fit_model = model.fit()
             forecast = fit_model.forecast(steps=forecast_periods)
@@ -135,8 +124,6 @@ def forecast_sector(df, sector, model_type, forecast_periods=4):
 
 def plot_forecast(historical, forecast, sector, model_type):
     fig = go.Figure()
-    
-    # Historical data
     fig.add_trace(go.Scatter(
         x=historical.index,
         y=historical,
@@ -144,8 +131,6 @@ def plot_forecast(historical, forecast, sector, model_type):
         name='Historical',
         line=dict(color='blue')
     ))
-    
-    # Forecasted data
     fig.add_trace(go.Scatter(
         x=forecast.index,
         y=forecast,
@@ -153,55 +138,74 @@ def plot_forecast(historical, forecast, sector, model_type):
         name='Forecast',
         line=dict(color='red', dash='dash')
     ))
-    
     fig.update_layout(
         title=f"{sector} Forecast ({model_type})",
         xaxis_title="Date",
         yaxis_title="GDP (KES Million)",
         xaxis_tickangle=45
     )
-    
     return fig
 
-def generate_forecast_interpretation(historical, forecast, sector, model_type):
-    # Initialize interpretation list
-    interpretation = ["**What This Forecast Means:**", ""]  # Add introductory line with a blank line for spacing
+def generate_statistical_summary(historical, forecast):
+    """Generate statistical summary for historical and forecasted GDP data."""
+    stats = []
     
-    # 1. Net Trend (based on last historical to last forecasted value)
+    # Historical stats
+    hist_mean = historical.mean()
+    hist_std = historical.std()
+    hist_median = historical.median()
+    hist_min = historical.min()
+    hist_max = historical.max()
+    
+    # Forecasted stats
+    fcst_mean = forecast.mean()
+    fcst_std = forecast.std()
+    
+    # Percentage change (last historical to last forecasted)
+    last_hist = historical.iloc[-1]
+    last_fcst = forecast.iloc[-1]
+    pct_change = ((last_fcst - last_hist) / last_hist) * 100
+    
+    # Format stats as Markdown
+    stats.append("**Statistical Summary**:")
+    stats.append(f"- **Historical Mean**: {hist_mean:,.0f} KES Million")
+    stats.append(f"- **Forecasted Mean**: {fcst_mean:,.0f} KES Million")
+    stats.append(f"- **Historical Standard Deviation**: {hist_std:,.0f} KES Million")
+    stats.append(f"- **Forecasted Standard Deviation**: {fcst_std:,.0f} KES Million")
+    stats.append(f"- **Percentage Change**: {'+' if pct_change >= 0 else ''}{pct_change:.1f}%")
+    stats.append(f"- **Historical Median**: {hist_median:,.0f} KES Million")
+    stats.append(f"- **Historical Min**: {hist_min:,.0f} KES Million")
+    stats.append(f"- **Historical Max**: {hist_max:,.0f} KES Million")
+    
+    return "\n".join(stats)
+
+def generate_forecast_interpretation(historical, forecast, sector, model_type):
+    interpretation = ["**What This Forecast Means:**", ""]
     last_historical = historical.iloc[-1]
     last_forecast = forecast.values[-1]
     net_change = last_forecast - last_historical
     trend = "increasing" if net_change > 0 else "decreasing" if net_change < 0 else "stable"
     interpretation.append(f"- **Overall Trend**: The forecast for {sector} shows an {trend} trend over the next {len(forecast)} quarters, from the last historical value to the end of the forecast period.")
-    interpretation.append("")  # Add blank line for spacing
-    
-    # 2. Magnitude of Change
+    interpretation.append("")
     percentage_change = (net_change / last_historical) * 100
     change_direction = "increase" if percentage_change > 0 else "decrease" if percentage_change < 0 else "no change"
     percentage_change = abs(percentage_change)
-    # Fix date formatting for the last forecast date
     last_forecast_date = forecast.index[-1]
-    quarter = (last_forecast_date.month - 1) // 3 + 1  # Convert month to quarter (1-4)
+    quarter = (last_forecast_date.month - 1) // 3 + 1
     year = last_forecast_date.year
     interpretation.append(f"- **Change**: From the last recorded value ({last_historical:,.0f} KES Million), the GDP is expected to {change_direction} by {percentage_change:.1f}% to {last_forecast:,.0f} KES Million by {year} Q{quarter}.")
-    interpretation.append("")  # Add blank line for spacing
-    
-    # 3. Fluctuations Within Forecast Period
+    interpretation.append("")
     forecast_values = forecast.values
     if len(forecast_values) > 1:
         diffs = np.diff(forecast_values)
-        if np.std(diffs) > np.mean(np.abs(diffs)) * 0.5:  # Check for significant fluctuations
+        if np.std(diffs) > np.mean(np.abs(diffs)) * 0.5:
             interpretation.append(f"- **Fluctuations**: Within the forecast period, there are noticeable ups and downs, likely due to seasonal patterns or short-term variations in {sector}.")
         else:
             interpretation.append(f"- **Fluctuations**: The forecast shows a relatively smooth trend with minor variations across the quarters.")
-    interpretation.append("")  # Add blank line for spacing
-    
-    # 4. Seasonality (if applicable)
+    interpretation.append("")
     if model_type in ["SARIMA", "Holt-Winters", "Prophet"]:
         interpretation.append(f"- **Seasonality**: The forecast captures seasonal patterns, which are expected for {sector} due to quarterly cycles (e.g., harvest seasons, tourism peaks). These patterns are modeled by {model_type} to reflect historical trends.")
-        interpretation.append("")  # Add blank line for spacing
-    
-    # 5. Contextual Insight
+        interpretation.append("")
     if sector == "Agriculture":
         interpretation.append(f"- **Insight**: Agriculture often experiences seasonal fluctuations due to planting and harvest cycles. The {model_type} model accounts for these patterns, suggesting potential growth or decline based on historical trends.")
     elif sector == "Mining & Quarrying":
@@ -237,26 +241,19 @@ def create_forecasting_tab(df):
     st.header("Forecasting")
     st.write("Select a sector to view its forecasted GDP values for the next 4 quarters.")
 
-    # Sector selection for forecasting
     forecast_sectors = list(FORECAST_MODELS.keys())
     selected_forecast_sector = st.selectbox("Select Sector for Forecasting", forecast_sectors)
 
-    # Get the model type
     model_type = FORECAST_MODELS[selected_forecast_sector]
-
-    # Perform forecasting
     historical, forecast, error = forecast_sector(df, selected_forecast_sector, model_type)
 
     if error:
         st.error(error)
     else:
-        # Plot the forecast
         fig = plot_forecast(historical, forecast, selected_forecast_sector, model_type)
         st.plotly_chart(fig, use_container_width=True, key=f"forecast_{selected_forecast_sector}_chart")
 
-        # Display forecast values
         st.subheader("Forecasted Values")
-        # Convert datetime index to Year_Quarter format
         year_quarter = [f"{date.year} Q{(date.month - 1) // 3 + 1}" for date in forecast.index]
         forecast_df = pd.DataFrame({
             "Date": year_quarter,
@@ -264,7 +261,11 @@ def create_forecasting_tab(df):
         })
         st.write(forecast_df)
 
-        # Display interpretation
+        # Add statistical summary
+        st.subheader("Statistical Summary")
+        stats_summary = generate_statistical_summary(historical, forecast)
+        st.markdown(stats_summary)
+
         st.subheader("Interpretation")
         interpretation = generate_forecast_interpretation(historical, forecast, selected_forecast_sector, model_type)
         st.markdown(interpretation)
