@@ -5,6 +5,76 @@ import plotly.express as px
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import stats as scipy_stats
+from sklearn.linear_model import LinearRegression
+
+def interpret_statistical_measures(mae, mse, rmse, mape, z_value, p_value, sector):
+    """
+    Generate interpretations for statistical measures.
+    Args:
+        mae: Mean Absolute Error
+        mse: Mean Squared Error
+        rmse: Root Mean Squared Error
+        mape: Mean Absolute Percentage Error
+        z_value: Z-Value
+        p_value: P-Value
+        sector: Name of the sector being analyzed
+    Returns:
+        List of interpretation strings
+    """
+    interpretations = []
+    
+    # MAE Interpretation
+    interpretations.append(f"**Error Metrics Interpretation for {sector}:**")
+    interpretations.append(f"- The Mean Absolute Error (MAE) of {mae:,.0f} KES Million indicates the average magnitude of prediction errors. "
+                         f"This means our predictions typically deviate by {mae:,.0f} KES Million from actual values.")
+    
+    # RMSE vs MAE Interpretation
+    if rmse > mae:
+        interpretations.append(f"- The Root Mean Squared Error (RMSE) of {rmse:,.0f} KES Million is larger than the MAE, "
+                             "suggesting the presence of some larger prediction errors or outliers in the data.")
+    else:
+        interpretations.append(f"- The Root Mean Squared Error (RMSE) of {rmse:,.0f} KES Million is close to the MAE, "
+                             "indicating consistent prediction errors without major outliers.")
+    
+    # MAPE Interpretation
+    if mape < 10:
+        accuracy_level = "excellent"
+    elif mape < 20:
+        accuracy_level = "good"
+    elif mape < 30:
+        accuracy_level = "acceptable"
+    else:
+        accuracy_level = "poor"
+    
+    interpretations.append(f"- The Mean Absolute Percentage Error (MAPE) of {mape:.1f}% indicates {accuracy_level} prediction accuracy. "
+                         f"This means our predictions are typically off by {mape:.1f}% of the actual value.")
+    
+    # Z-Value Interpretation
+    if abs(z_value) > 2:
+        z_interpretation = "significantly different from"
+    elif abs(z_value) > 1:
+        z_interpretation = "moderately different from"
+    else:
+        z_interpretation = "close to"
+    
+    interpretations.append(f"- The Z-Value of {z_value:.2f} indicates that the latest observation is {z_interpretation} "
+                         "the historical mean in terms of standard deviations.")
+    
+    # P-Value Interpretation
+    if p_value < 0.01:
+        significance = "strong"
+    elif p_value < 0.05:
+        significance = "moderate"
+    elif p_value < 0.1:
+        significance = "weak"
+    else:
+        significance = "no"
+    
+    interpretations.append(f"- The P-Value of {p_value:.4f} suggests {significance} statistical significance in the trend. "
+                         f"{'This indicates a meaningful pattern in the data.' if significance != 'no' else 'This suggests the variations might be random.'}")
+    
+    return interpretations
 
 def generate_statistical_summary(data, sectors, chart_type="time-series"):
     """
@@ -38,19 +108,44 @@ def generate_statistical_summary(data, sectors, chart_type="time-series"):
             continue
 
         if chart_type == "time-series":
-            # Full stats for time-series charts
+            # Basic statistics
             mean_val = sector_data.mean()
             std_val = sector_data.std()
             median_val = sector_data.median()
             min_val = sector_data.min()
             max_val = sector_data.max()
-            # Percentage change (first to last)
+
+            # Error metrics and statistical tests
             if len(sector_data) > 1:
-                first_val = sector_data.iloc[0]
-                last_val = sector_data.iloc[-1]
-                pct_change = ((last_val - first_val) / first_val) * 100 if first_val != 0 else np.nan
-            else:
-                pct_change = np.nan
+                # Calculate trend using simple linear regression
+                X = np.arange(len(sector_data)).reshape(-1, 1)
+                y = sector_data.values
+                model = LinearRegression()
+                model.fit(X, y)
+                predicted = model.predict(X)
+
+                # Mean Absolute Error
+                mae = np.mean(np.abs(y - predicted))
+                
+                # Mean Squared Error
+                mse = np.mean((y - predicted) ** 2)
+                
+                # Root Mean Squared Error
+                rmse = np.sqrt(mse)
+                
+                # Mean Absolute Percentage Error
+                mape = np.mean(np.abs((y - predicted) / y)) * 100
+                
+                # Z-Value for the latest observation
+                z_value = (sector_data.iloc[-1] - mean_val) / std_val if std_val != 0 else 0
+                
+                # P-Value from t-test against the mean
+                _, p_value = scipy_stats.ttest_1samp(sector_data, sector_data.mean())
+
+            # Percentage change (first to last)
+            first_val = sector_data.iloc[0]
+            last_val = sector_data.iloc[-1]
+            pct_change = ((last_val - first_val) / first_val) * 100 if first_val != 0 else np.nan
 
             stats.append(f"- **{sector}**:")
             stats.append(f"  - **Historical Mean**: {mean_val:,.0f} KES Million")
@@ -59,6 +154,21 @@ def generate_statistical_summary(data, sectors, chart_type="time-series"):
             stats.append(f"  - **Historical Min**: {min_val:,.0f} KES Million")
             stats.append(f"  - **Historical Max**: {max_val:,.0f} KES Million")
             stats.append(f"  - **Percentage Change**: {'+' if pct_change >= 0 else ''}{pct_change:.1f}%" if not np.isnan(pct_change) else "  - **Percentage Change**: Not applicable")
+            
+            if len(sector_data) > 1:
+                stats.append("\n  **Error and Statistical Measures:**")
+                stats.append(f"  - **Mean Absolute Error**: {mae:,.0f} KES Million")
+                stats.append(f"  - **Mean Squared Error**: {mse:,.0f} KES Million")
+                stats.append(f"  - **Root Mean Squared Error**: {rmse:,.0f} KES Million")
+                stats.append(f"  - **Mean Absolute Percentage Error**: {mape:.1f}%")
+                stats.append(f"  - **Z-Value (Latest)**: {z_value:.2f}")
+                stats.append(f"  - **P-Value**: {p_value:.4f}")
+                
+                # Add interpretations
+                stats.append("\n")
+                interpretations = interpret_statistical_measures(mae, mse, rmse, mape, z_value, p_value, sector)
+                stats.extend(interpretations)
+                stats.append("\n")
 
         elif chart_type == "snapshot":
             # Minimal stats for snapshot charts
